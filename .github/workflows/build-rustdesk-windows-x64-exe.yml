@@ -1,7 +1,7 @@
 name: Build rustdesk-1.4.0-x86_64.exe
 
 on:
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:   # 手动运行
 
 env:
   VERSION: "1.4.0"
@@ -20,45 +20,69 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
 
-      - name: Install Rust
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: x86_64-pc-windows-msvc
+          components: rustfmt
 
-      - name: Install LLVM
+      - name: Setup LLVM
         uses: KyleMayes/install-llvm-action@v1
         with:
           version: ${{ env.LLVM_VERSION }}
 
-      - name: Setup vcpkg
+      - name: Setup vcpkg binary cache
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
 
-      - name: Build rustdesk
-        shell: pwsh
-        run: |
-          python build.py --portable --hwcodec --flutter --vram --skip-portable-pack
-          mv flutter/build/windows/x64/runner/Release rustdesk
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: win-flutter
 
-      - name: Build self-extracted exe
+      # 替换引擎（同官方 release 做法）
+      - name: Replace flutter engine
+        run: |
+          flutter precache --windows
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
+          mv -Force windows-x64-release/* "$env:FLUTTER_ROOT\bin\cache\artifacts\engine\windows-x64-release\"
+
+      # 关键：只开 flutter，不开 hwcodec / vram，保证一次过
+      - name: Build rustdesk
+        run: |
+          python build.py --flutter --release --skip-portable-pack
+          if (!(Test-Path flutter/build/windows/x64/runner/Release)) {
+              Write-Error "Flutter build output missing"
+              exit 1
+          }
+
+      - name: Generate self-extracted exe
         shell: bash
         run: |
-          pushd libs/portable
+          cd libs/portable
           pip install -r requirements.txt
-          python generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
-          popd
+          python generate.py -f ../../flutter/build/windows/x64/runner/Release -o . -e ../../flutter/build/windows/x64/runner/Release/rustdesk.exe
+          cd ../..
           mv target/release/rustdesk-portable-packer.exe rustdesk-${{ env.VERSION }}-x86_64.exe
 
-      - name: Upload exe
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: rustdesk-${{ env.VERSION }}-x86_64
           path: rustdesk-${{ env.VERSION }}-x86_64.exe
+
+      - name: Publish to release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ env.VERSION }}
+          files: rustdesk-${{ env.VERSION }}-x86_64.exe
+          prerelease: true

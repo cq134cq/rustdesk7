@@ -1,0 +1,64 @@
+name: Build rustdesk-1.4.0-x86_64.exe
+
+on:
+  workflow_dispatch:  # 手动触发
+
+env:
+  VERSION: "1.4.0"
+  FLUTTER_VERSION: "3.24.5"
+  RUST_VERSION: "1.75"
+  LLVM_VERSION: "15.0.6"
+  VCPKG_COMMIT_ID: "6f29f12e82a8293156836ad81cc9bf5af41fe836"
+  UPLOAD_ARTIFACT: true
+
+jobs:
+  build-windows-x64-exe:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install LLVM
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: ${{ env.LLVM_VERSION }}
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+
+      - name: Build rustdesk
+        shell: pwsh
+        run: |
+          python build.py --portable --hwcodec --flutter --vram --skip-portable-pack
+          mv flutter/build/windows/x64/runner/Release rustdesk
+
+      - name: Build self-extracted exe
+        shell: bash
+        run: |
+          pushd libs/portable
+          pip install -r requirements.txt
+          python generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          popd
+          mv target/release/rustdesk-portable-packer.exe rustdesk-${{ env.VERSION }}-x86_64.exe
+
+      - name: Upload exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdesk-${{ env.VERSION }}-x86_64
+          path: rustdesk-${{ env.VERSION }}-x86_64.exe

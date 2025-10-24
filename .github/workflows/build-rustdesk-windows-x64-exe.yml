@@ -59,7 +59,7 @@ jobs:
       # 关键：只开 flutter，不开 hwcodec / vram，保证一次过
       - name: Build rustdesk
         run: |
-          python build.py --flutter --release --skip-portable-pack
+          python build.py --flutter --skip-portable-pack
           if (!(Test-Path flutter/build/windows/x64/runner/Release)) {
               Write-Error "Flutter build output missing"
               exit 1
